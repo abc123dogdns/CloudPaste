@@ -1,0 +1,325 @@
+<!DOCTYPE html> 
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>🎬 媒体播放器</title>
+  <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate" />
+  <meta http-equiv="Pragma" content="no-cache" />
+  <meta http-equiv="Expires" content="0" />
+
+	<style>
+	  html, body {
+		margin: 0;
+		padding: 0;
+		background: #fff;
+		color: #000;
+		font-family: Arial, sans-serif;
+		height: 100%;
+		overflow: hidden;
+	  }
+
+	  body {
+		display: flex;
+		flex-direction: column;
+		align-items: center;
+		height: 100vh; /* ✅ 保证全高用于内部滚动 */
+	  }
+
+	  header {
+		background: #eee;
+		padding: 1em;
+		font-size: 1.5em;
+		width: 100%;
+		text-align: center;
+		border-bottom: 1px solid #ccc;
+		flex-shrink: 0;
+	  }
+
+	  #fixedTop {
+		background: #fff;
+		width: 100%;
+		box-sizing: border-box;
+		padding: 0.8em 1em 0.3em;
+		/* border-bottom: 1px solid #ccc; 注掉此行可去掉播放器和播放列表间的线条*/
+		flex-shrink: 0;
+		display: flex;
+		justify-content: center;
+	  }
+
+	  .fixed-wrapper {
+		width: 100%;
+		max-width: 700px;
+		box-sizing: border-box;
+	  }
+
+	  .select-row {
+		display: flex;
+		align-items: center;
+		gap: 0.5em;
+		flex-wrap: nowrap;
+	  }
+
+	  .select-row label {
+		white-space: nowrap;
+	  }
+
+	  .select-row select {
+		flex: 1;
+		font-size: 1rem;
+		padding: 0.6em 1em;
+		border: 1px solid #ccc;
+		border-radius: 6px;
+		cursor: pointer;
+		box-sizing: border-box;
+		min-width: 0;
+		max-width: 100%;
+	  }
+
+	  #player-container {
+		background: transparent;
+		padding: 0.5em 0 0.3em;
+		flex-shrink: 0;
+		width: 100%;
+		max-width: 700px;
+		box-sizing: border-box;
+	  }
+
+	  audio, video {
+		width: 100%;
+		max-height: 360px;
+		border-radius: 6px;
+		outline: none;
+		background: transparent;
+	  }
+
+	  main {
+		flex: 1;
+		width: 100%;
+		overflow-y: auto;
+		display: flex;
+		justify-content: center;
+		-webkit-overflow-scrolling: touch; /* ✅ 平滑滚动 for iOS */
+	  }
+
+	  .track-wrapper {
+		width: 100%;
+		max-width: 700px;
+		box-sizing: border-box;
+		padding: 0em 0.8em 1em; /* 播放器与播放列表第一个条目之间的空白间距 顶部间距小，左右保持 1em */
+	  }
+
+	  #trackList {
+		list-style: none;
+		margin: 0.5em 0 0;
+		padding: 0 0.5em 8em; /* ✅ 增加底部空白 3em */
+	  }
+
+	  #trackList li {
+		margin-bottom: 0.5em;
+		cursor: pointer;
+		color: #0066cc;
+		word-break: break-word;
+	  }
+
+	  #trackList li:hover {
+		text-decoration: underline;
+	  }
+
+	  #trackList li.active {
+		font-weight: bold;
+		color: #cc0000;
+	  }
+	</style>
+  <script src="https://cdn.jsdelivr.net/npm/hls.js@latest"></script>
+</head>
+<body>
+  <header>🎬 媒体播放器</header>
+
+  <div id="fixedTop">
+    <div class="fixed-wrapper">
+      <div class="select-row">
+        <label for="fileSelect">播放列表：</label>
+        <select id="fileSelect"></select>
+      </div>
+      <div id="player-container">
+        <audio id="mediaPlayer" controls preload="metadata">
+          您的浏览器不支持音频播放。
+        </audio>
+      </div>
+    </div>
+  </div>
+
+  <main>
+    <div class="track-wrapper">
+      <ul id="trackList"></ul>
+    </div>
+  </main>
+
+  <script>
+    let player = document.getElementById('mediaPlayer');
+    const fileSelect = document.getElementById('fileSelect');
+    const trackListEl = document.getElementById('trackList');
+
+    let currentPlaylist = [];
+    let currentIndex = 0;
+    let hls = null;
+
+    function bindEndedEvent() {
+      player.addEventListener('ended', () => {
+        currentIndex = (currentIndex + 1) % currentPlaylist.length;
+        loadTrack(currentIndex, true);
+      });
+    }
+
+    async function fetchPlaylistFiles() {
+      try {
+        const res = await fetch('https://b2nocache.aitech.xx.kg/playlist-player/index.txt');
+        const text = await res.text();
+        const lines = text
+          .split(/\r?\n/)
+          .map(line => line.trim())
+          .filter(line =>
+            line && !line.startsWith('#') && (line.includes('.') || line.startsWith('http'))
+          );
+        return lines;
+      } catch (e) {
+        console.error("无法读取 index.txt", e);
+        return [];
+      }
+    }
+
+    async function loadPlaylist(fileURL, autoplay = false) {
+      try {
+        const res = await fetch(fileURL);
+        const contentType = res.headers.get('Content-Type') || '';
+        const isJson = contentType.includes('application/json') || fileURL.endsWith('.json') || fileURL.includes('/api/');
+
+        if (hls) {
+          hls.destroy();
+          hls = null;
+        }
+
+        if (isJson) {
+          const json = await res.json();
+          let list = Array.isArray(json) ? json : Array.isArray(json.data) ? json.data : [];
+
+          currentPlaylist = list
+            .filter(item => item.url)
+            .map(item => ({
+              fileName: decodeURIComponent(item.filename || item.title || '未命名'),
+              url: item.url
+            }));
+        } else {
+          const text = await res.text();
+          const lines = text.split(/\r?\n/).filter(Boolean);
+          currentPlaylist = lines.map(line => {
+            const [name, url] = line.split(',').map(s => s.trim());
+            return { fileName: name, url };
+          });
+        }
+
+        if (currentPlaylist.length === 0) {
+          alert("播放列表为空：" + fileURL);
+          return;
+        }
+
+        currentIndex = 0;
+        renderTrackList();
+        loadTrack(0, autoplay);
+      } catch (e) {
+        console.error("无法加载播放列表文件:", fileURL, e);
+        alert("无法加载播放列表：" + fileURL);
+      }
+    }
+
+    function renderTrackList() {
+      trackListEl.innerHTML = '';
+      currentPlaylist.forEach((item, i) => {
+        const li = document.createElement('li');
+        li.textContent = `${i + 1} - ${item.fileName}`;
+        li.className = (i === currentIndex) ? 'active' : '';
+        li.onclick = () => loadTrack(i, true);
+        trackListEl.appendChild(li);
+      });
+    }
+
+    function loadTrack(index, autoplay = false) {
+      currentIndex = index;
+      const item = currentPlaylist[index];
+      const url = item.url.toLowerCase();
+      const ext = url.split('.').pop().split('?')[0];
+      const isHLS = url.endsWith('.m3u8');
+
+      const isLikelyVideo = ['mp4', 'webm', 'mkv'].includes(ext) || 
+                            (isHLS && url.includes('video')) || 
+                            (isHLS && !url.includes('audio'));
+
+      if (isLikelyVideo) {
+        if (!(player instanceof HTMLVideoElement)) replacePlayer('video');
+      } else {
+        if (!(player instanceof HTMLAudioElement)) replacePlayer('audio');
+      }
+
+      if (hls) {
+        hls.destroy();
+        hls = null;
+      }
+
+      if (isHLS && Hls.isSupported()) {
+        hls = new Hls();
+        hls.loadSource(item.url);
+        hls.attachMedia(player);
+        hls.on(Hls.Events.MANIFEST_PARSED, () => {
+          if (autoplay) player.play().catch(() => {});
+        });
+      } else {
+        player.src = item.url;
+        player.title = item.fileName;
+        player.load();
+        if (autoplay) player.play().catch(() => {});
+      }
+
+      renderTrackList();
+    }
+
+    function replacePlayer(type) {
+      const container = document.getElementById('player-container');
+      container.innerHTML = type === 'video'
+        ? `<video id="mediaPlayer" controls preload="metadata" playsinline>
+             您的浏览器不支持视频播放。
+           </video>`
+        : `<audio id="mediaPlayer" controls preload="metadata">
+             您的浏览器不支持音频播放。
+           </audio>`;
+
+      player = document.getElementById('mediaPlayer');
+      bindEndedEvent();
+    }
+
+    (async () => {
+      bindEndedEvent();
+      const files = await fetchPlaylistFiles();
+      if (files.length === 0) {
+        alert('未发现任何播放列表文件');
+        return;
+      }
+
+      files.forEach(f => {
+        const opt = document.createElement('option');
+        opt.value = f;
+        const fullName = decodeURIComponent(f.split('/').pop());
+        const nameWithoutExt = fullName.replace(/\.[^/.]+$/, '');
+        opt.textContent = nameWithoutExt;
+        fileSelect.appendChild(opt);
+      });
+
+      fileSelect.addEventListener('change', () => {
+        loadPlaylist(fileSelect.value, false);
+      });
+
+      loadPlaylist(files[0], false);  // 打开时加载但不播放
+    })();
+  </script>
+</body>
+</html>
