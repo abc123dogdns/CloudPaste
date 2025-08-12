@@ -8,8 +8,8 @@ export default defineConfig(({ command, mode }) => {
   // 加载环境变量
   const env = loadEnv(mode, process.cwd(), "");
 
-  // 🎯 统一版本管理
-  const APP_VERSION = "0.7.3";
+  // 统一版本管理
+  const APP_VERSION = "0.7.9";
   const isDev = command === "serve";
 
   // 打印环境变量，帮助调试
@@ -46,12 +46,12 @@ export default defineConfig(({ command, mode }) => {
           navigateFallback: "index.html",
           navigateFallbackAllowlist: [/^\/$/, /^\/upload$/, /^\/admin/, /^\/paste\/.+/, /^\/file\/.+/, /^\/mount-explorer/],
 
-          // 🎯 集成自定义Service Worker代码以支持Background Sync API
+          // 集成自定义Service Worker代码以支持Background Sync API
           importScripts: ["/sw-background-sync.js"],
 
-          // 🎯 基于主流PWA最佳实践的正确缓存策略
+          // 基于主流PWA最佳实践的正确缓存策略
           runtimeCaching: [
-            // 📦 应用静态资源 - StaleWhileRevalidate
+            // 应用静态资源 - StaleWhileRevalidate
             {
               urlPattern: ({ request }) => request.destination === "style" || request.destination === "script" || request.destination === "worker",
               handler: "StaleWhileRevalidate",
@@ -67,7 +67,7 @@ export default defineConfig(({ command, mode }) => {
               },
             },
 
-            // 🔤 字体文件 - CacheFirst
+            // 字体文件 - CacheFirst（字体很少变化，可长期缓存）
             {
               urlPattern: ({ request }) => request.destination === "font",
               handler: "CacheFirst",
@@ -83,15 +83,15 @@ export default defineConfig(({ command, mode }) => {
               },
             },
 
-            // 🌍 第三方CDN资源 - CacheFirst（外部资源稳定）
+            // 第三方CDN资源 - CacheFirst（外部资源稳定）
             {
               urlPattern: ({ url }) =>
-                url.origin !== self.location.origin &&
-                (url.hostname.includes("cdn") ||
-                  url.hostname.includes("googleapis") ||
-                  url.hostname.includes("gstatic") ||
-                  url.hostname.includes("jsdelivr") ||
-                  url.hostname.includes("unpkg")),
+                  url.origin !== self.location.origin &&
+                  (url.hostname.includes("cdn") ||
+                      url.hostname.includes("googleapis") ||
+                      url.hostname.includes("gstatic") ||
+                      url.hostname.includes("jsdelivr") ||
+                      url.hostname.includes("unpkg")),
               handler: "CacheFirst",
               options: {
                 cacheName: "external-cdn-resources",
@@ -105,10 +105,10 @@ export default defineConfig(({ command, mode }) => {
               },
             },
 
-            // 🖼️ 图廊图片 - NetworkFirst
+            // 图廊图片 - NetworkFirst
             {
               urlPattern: ({ request, url }) =>
-                request.destination === "image" && (url.pathname.includes("/api/") || url.searchParams.has("X-Amz-Algorithm") || url.hostname !== self.location.hostname),
+                  request.destination === "image" && (url.pathname.includes("/api/") || url.searchParams.has("X-Amz-Algorithm") || url.hostname !== self.location.hostname),
               handler: "NetworkFirst",
               options: {
                 cacheName: "gallery-images",
@@ -123,11 +123,11 @@ export default defineConfig(({ command, mode }) => {
               },
             },
 
-            // 🎵 用户媒体文件 - NetworkFirst（大文件适度缓存）
+            // 用户媒体文件 - NetworkFirst（大文件适度缓存）
             {
               urlPattern: ({ request, url }) =>
-                (request.destination === "video" || request.destination === "audio" || /\.(mp4|webm|ogg|mp3|wav|flac|aac)$/i.test(url.pathname)) &&
-                (url.pathname.includes("/api/") || url.searchParams.has("X-Amz-Algorithm") || url.hostname !== self.location.hostname),
+                  (request.destination === "video" || request.destination === "audio" || /\.(mp4|webm|ogg|mp3|wav|flac|aac)$/i.test(url.pathname)) &&
+                  (url.pathname.includes("/api/") || url.searchParams.has("X-Amz-Algorithm") || url.hostname !== self.location.hostname),
               handler: "NetworkFirst",
               options: {
                 cacheName: "user-media",
@@ -143,11 +143,11 @@ export default defineConfig(({ command, mode }) => {
               },
             },
 
-            // 📄 用户文档文件 - NetworkFirst（文档快速更新）
+            // 用户文档文件 - NetworkFirst（文档快速更新）
             {
               urlPattern: ({ url }) =>
-                /\.(pdf|doc|docx|xls|xlsx|ppt|pptx|txt|md)$/i.test(url.pathname) &&
-                (url.pathname.includes("/api/") || url.searchParams.has("X-Amz-Algorithm") || url.hostname !== self.location.hostname),
+                  /\.(pdf|doc|docx|xls|xlsx|ppt|pptx|txt|md)$/i.test(url.pathname) &&
+                  (url.pathname.includes("/api/") || url.searchParams.has("X-Amz-Algorithm") || url.hostname !== self.location.hostname),
               handler: "NetworkFirst",
               options: {
                 cacheName: "user-documents",
@@ -162,7 +162,7 @@ export default defineConfig(({ command, mode }) => {
               },
             },
 
-            // 🖼️ 应用内置图片 - StaleWhileRevalidate（应用资源）
+            // 应用内置图片 - StaleWhileRevalidate（应用资源）
             {
               urlPattern: ({ request, url }) => request.destination === "image" && url.origin === self.location.origin && !url.pathname.includes("/api/"),
               handler: "StaleWhileRevalidate",
@@ -178,7 +178,7 @@ export default defineConfig(({ command, mode }) => {
               },
             },
 
-            // 🔧 系统API缓存 - NetworkFirst
+            // 系统API缓存 - NetworkFirst
             {
               urlPattern: /^.*\/api\/(system\/max-upload-size|health|version).*$/,
               handler: "NetworkFirst",
@@ -195,92 +195,52 @@ export default defineConfig(({ command, mode }) => {
               },
             },
 
-            // 📁 文件系统API缓存 - NetworkFirst
+            // 文件系统动态操作API - NetworkOnly（不缓存，确保实时性）
             {
-              urlPattern: /^.*\/api\/fs\/.*$/,
-              handler: "NetworkFirst",
+              urlPattern: /^.*\/api\/fs\/(get|list|upload|batch-remove|batch-copy|mkdir|multipart|download|update|create-share).*$/,
+              handler: "NetworkOnly",
               options: {
-                cacheName: "fs-api",
-                expiration: {
-                  maxEntries: 200, // 增加容量支持更多文件信息
-                  maxAgeSeconds: 30 * 60, // 30分钟（文件信息相对稳定）
-                },
-                networkTimeoutSeconds: 8, // 增加超时时间
-                cacheableResponse: {
-                  statuses: [0, 200],
-                },
+                cacheName: "fs-dynamic-operations",
               },
             },
 
-            // 📝 文本分享API缓存 - NetworkFirst（内容短期缓存）
+            // 文件系统预签名URL - NetworkOnly（每次生成新URL和fileId）
+            {
+              urlPattern: /^.*\/api\/fs\/(presign|file-link).*$/,
+              handler: "NetworkOnly",
+              options: {
+                cacheName: "fs-presign-operations",
+              },
+            },
+
+            // 文本分享API - NetworkOnly（涉及访问计数，必须实时）
             {
               urlPattern: /^.*\/api\/(pastes|paste|raw)\/.*$/,
-              handler: "NetworkFirst",
+              handler: "NetworkOnly",
               options: {
-                cacheName: "pastes-api",
-                expiration: {
-                  maxEntries: 30,
-                  maxAgeSeconds: 5 * 60, // 5分钟（文本内容短期缓存）
-                },
-                networkTimeoutSeconds: 4,
-                cacheableResponse: {
-                  statuses: [0, 200],
-                },
+                cacheName: "pastes-realtime",
               },
             },
 
-            // 🗂️ 配置管理API缓存 - NetworkFirst（配置信息适度缓存）
-            {
-              urlPattern: /^.*\/api\/(admin\/mounts|admin\/api-keys|admin\/system-settings|files)\/.*$/,
-              handler: "NetworkFirst",
-              options: {
-                cacheName: "config-api",
-                expiration: {
-                  maxEntries: 30,
-                  maxAgeSeconds: 30 * 60, // 30分钟（配置变更不频繁）
-                },
-                networkTimeoutSeconds: 4,
-                cacheableResponse: {
-                  statuses: [0, 200],
-                },
-              },
-            },
-
-            // 🔍 搜索API缓存 - NetworkFirst
+            // 搜索API - NetworkOnly（后端已有缓存，前端不应再缓存）
             {
               urlPattern: /^.*\/api\/fs\/search.*$/,
-              handler: "NetworkFirst",
+              handler: "NetworkOnly",
               options: {
-                cacheName: "search-api",
-                expiration: {
-                  maxEntries: 20,
-                  maxAgeSeconds: 5 * 60, // 5分钟
-                },
-                networkTimeoutSeconds: 6,
-                cacheableResponse: {
-                  statuses: [0, 200],
-                },
+                cacheName: "search-realtime",
               },
             },
 
-            // 📤 上传API缓存 - NetworkFirst
+            // 上传相关API - NetworkOnly（操作性API，不应缓存）
             {
-              urlPattern: /^.*\/api\/(upload|fs\/upload|fs\/presign|fs\/multipart|url)\/.*$/,
-              handler: "NetworkFirst",
+              urlPattern: /^.*\/api\/(upload|url)\/.*$/,
+              handler: "NetworkOnly",
               options: {
-                cacheName: "upload-api",
-                expiration: {
-                  maxEntries: 20,
-                  maxAgeSeconds: 10 * 60, // 10分钟
-                },
-                networkTimeoutSeconds: 8,
-                cacheableResponse: {
-                  statuses: [0, 200],
-                },
+                cacheName: "upload-operations",
               },
             },
 
-            // 🌐 公共API缓存 - NetworkFirst
+            // 公共API缓存 - NetworkFirst
             {
               urlPattern: /^.*\/api\/public\/.*$/,
               handler: "NetworkFirst",
@@ -297,41 +257,53 @@ export default defineConfig(({ command, mode }) => {
               },
             },
 
-            // 📊 WebDAV缓存 - NetworkFirst（WebDAV操作无缓存）
+            // WebDAV API - NetworkOnly（实时性要求高）
             {
               urlPattern: /^.*\/dav\/.*$/,
-              handler: "NetworkFirst",
+              handler: "NetworkOnly",
               options: {
-                cacheName: "webdav-api",
-                expiration: {
-                  maxEntries: 30,
-                  maxAgeSeconds: 1 * 60, // 1分钟（WebDAV操作几乎无缓存）
-                },
-                networkTimeoutSeconds: 10,
-                cacheableResponse: {
-                  statuses: [0, 200, 207], // 包含WebDAV的207状态码
-                },
+                cacheName: "webdav-realtime",
               },
             },
 
-            // 🔗 预签名URL缓存 - NetworkFirst
+            // S3预签名URL - NetworkOnly（避免URL过期问题）
             {
               urlPattern: ({ url }) => url.searchParams.has("X-Amz-Algorithm") || url.searchParams.has("Signature") || url.pathname.includes("/presigned/"),
+              handler: "NetworkOnly",
+              options: {
+                cacheName: "presigned-urls-realtime",
+              },
+            },
+
+            // 管理员配置读取API - 短期缓存（仅GET请求）
+            {
+              urlPattern: ({ request, url }) => request.method === "GET" && /^.*\/api\/(admin\/mounts|admin\/api-keys|admin\/system-settings).*$/.test(url.href),
               handler: "NetworkFirst",
               options: {
-                cacheName: "presigned-urls",
+                cacheName: "admin-config-read",
                 expiration: {
                   maxEntries: 20,
-                  maxAgeSeconds: 30 * 60, // 30分钟
+                  maxAgeSeconds: 5 * 60, // 5分钟（配置读取短期缓存）
                 },
-                networkTimeoutSeconds: 8,
+                networkTimeoutSeconds: 3,
                 cacheableResponse: {
                   statuses: [0, 200],
                 },
               },
             },
 
-            // 🎯 页面导航缓存 - NetworkFirst（页面短期缓存）
+            // 管理员配置写入API - NetworkOnly（POST/PUT/DELETE操作）
+            {
+              urlPattern: ({ request, url }) =>
+                  ["POST", "PUT", "DELETE"].includes(request.method) &&
+                  /^.*\/api\/(admin\/mounts|admin\/api-keys|admin\/system-settings|admin\/login|admin\/change-password|admin\/cache).*$/.test(url.href),
+              handler: "NetworkOnly",
+              options: {
+                cacheName: "admin-config-write",
+              },
+            },
+
+            // 页面导航缓存 - NetworkFirst（页面短期缓存）
             {
               urlPattern: ({ request }) => request.mode === "navigate",
               handler: "NetworkFirst",
@@ -348,7 +320,7 @@ export default defineConfig(({ command, mode }) => {
               },
             },
 
-            // 🔄 通用API回退缓存 - NetworkFirst（其他API短期缓存）
+            // 通用API回退缓存 - NetworkFirst（其他API短期缓存）
             {
               urlPattern: /^.*\/api\/.*$/,
               handler: "NetworkFirst",
@@ -366,7 +338,7 @@ export default defineConfig(({ command, mode }) => {
             },
           ],
         },
-        includeAssets: ["favicon.ico", "apple-touch-icon.png", "robots.txt"],
+        includeAssets: ["favicon.ico", "apple-touch-icon.png", "robots.txt", "dist/**/*"],
         manifest: {
           name: "CloudPaste",
           short_name: "CloudPaste",
@@ -455,8 +427,8 @@ export default defineConfig(({ command, mode }) => {
       },
     },
     optimizeDeps: {
-      include: ["vue-i18n", "chart.js", "qrcode"],
-      // 移除vditor排除配置，因为现在从assets加载
+      include: ["vue-i18n", "chart.js", "qrcode", "mime-db"],
+      // 移除vditor排除配置，因为现在从本地dist目录加载
     },
     build: {
       minify: "terser",
@@ -471,7 +443,6 @@ export default defineConfig(({ command, mode }) => {
           manualChunks: {
             // 将大型库分离到单独的 chunk
             "vendor-vue": ["vue", "vue-router", "vue-i18n"],
-            // 移除vditor chunk，因为现在从assets加载
             "vendor-charts": ["chart.js", "vue-chartjs"],
             "vendor-utils": ["axios", "qrcode", "file-saver", "docx", "html-to-image"],
           },

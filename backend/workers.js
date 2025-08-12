@@ -1,7 +1,7 @@
 import app from "./src/index.js";
 import { ApiStatus } from "./src/constants/index.js";
 import { checkAndInitDatabase } from "./src/utils/database.js";
-import { getWebDAVConfig } from "./src/webdav/auth/index.js";
+import { getWebDAVConfig, getPlatformConfig } from "./src/webdav/auth/index.js";
 
 // 记录数据库是否已初始化的内存标识
 let isDbInitialized = false;
@@ -10,7 +10,10 @@ let isDbInitialized = false;
 export default {
   async fetch(request, env, ctx) {
     try {
-      // D1数据库连接和加密密钥添加到环境中
+      // 获取Workers平台配置（仅用于头部设置）
+      const platformConfig = getPlatformConfig("workers");
+
+      // 创建一个新的环境对象，将D1数据库连接和加密密钥添加到环境中
       const bindings = {
         ...env,
         DB: env.DB, // D1数据库
@@ -20,7 +23,7 @@ export default {
       // 只在第一次请求时检查并初始化数据库
       if (!isDbInitialized) {
         console.log("首次请求，检查数据库状态...");
-        isDbInitialized = true; // 标记，避免并发请求重复初始化
+        isDbInitialized = true; // 先设置标记，避免并发请求重复初始化
         try {
           await checkAndInitDatabase(env.DB);
         } catch (error) {
@@ -56,6 +59,13 @@ export default {
             "X-MSDAVEXT": config.PROTOCOL.RESPONSE_HEADERS["X-MSDAVEXT"],
           };
 
+          // 应用平台特定头部
+          if (platformConfig.HEADERS) {
+            Object.entries(platformConfig.HEADERS).forEach(([key, value]) => {
+              webdavHeaders[key] = value;
+            });
+          }
+
           // 添加CORS头
           if (config.CORS.ENABLED) {
             webdavHeaders["Access-Control-Allow-Origin"] = config.CORS.ALLOW_ORIGIN;
@@ -74,13 +84,13 @@ export default {
           return newResponse;
         } catch (error) {
           console.error("Workers WebDAV处理错误:", error);
+
           return new Response("WebDAV处理错误", {
             status: 500,
             headers: { "Content-Type": "text/plain" },
           });
         }
       }
-
 
       // 处理原始文本内容请求 /api/raw/:slug
       if (pathParts.length >= 4 && pathParts[1] === "api" && pathParts[2] === "raw") {

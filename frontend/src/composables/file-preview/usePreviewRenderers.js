@@ -3,44 +3,17 @@
  * 专注预览渲染
  */
 
-import { ref, computed, nextTick, watch, onMounted, onUnmounted } from "vue";
-import { useI18n } from "vue-i18n";
+import { ref, computed, watch, onMounted, onUnmounted } from "vue";
 import { createAuthenticatedPreviewUrl } from "@/utils/fileUtils.js";
 import { formatDateTime } from "@/utils/timeUtils.js";
-import { formatFileSize as formatFileSizeUtil } from "@/utils/mimeUtils.js";
-import hljs from "highlight.js";
-// 移除循环依赖：useFilePreviewExtensions 将在上层调用
-import { usePreviewTypes } from "./usePreviewTypes.js";
+import { formatFileSize as formatFileSizeUtil, FileType, isArchiveFile } from "@/utils/fileTypes.js";
 
-// Vditor 相关全局变量
-let VditorClass = null;
-let vditorCSSLoaded = false;
-
-export function usePreviewRenderers(file, authInfo, emit, darkMode) {
-  const { t } = useI18n();
-
-  // 使用独立的类型检测器模块
-  const typeDetector = usePreviewTypes();
-
+export function usePreviewRenderers(file, emit, darkMode) {
   // ===== 状态管理 =====
 
-  // 文本内容相关
-  const textContent = ref("");
-  const isTextLoading = ref(false);
+  // 基本状态
   const loadError = ref(false);
   const authenticatedPreviewUrl = ref(null);
-
-  // 编辑模式相关
-  const isEditMode = ref(false);
-  const editContent = ref("");
-  const isSaving = ref(false);
-  const showModeDropdown = ref(false);
-
-  // 渲染状态相关
-  const isGeneratingPreview = ref(false);
-  const isMarkdownRendered = ref(false);
-  const highlightedContent = ref("");
-  const codeLanguage = ref("");
 
   // Office预览相关
   const officePreviewLoading = ref(false);
@@ -53,13 +26,9 @@ export function usePreviewRenderers(file, authInfo, emit, darkMode) {
 
   // 全屏状态
   const isOfficeFullscreen = ref(false);
-  const isHtmlFullscreen = ref(false);
 
   // DOM 引用
-  const previewContainer = ref(null);
-  const htmlIframe = ref(null);
   const officePreviewRef = ref(null);
-  const htmlPreviewRef = ref(null);
 
   // Office预览配置
   const officePreviewConfig = ref({
@@ -74,27 +43,41 @@ export function usePreviewRenderers(file, authInfo, emit, darkMode) {
    * 文件类型信息
    */
   const fileTypeInfo = computed(() => {
-    return typeDetector.getFileTypeInfo(file.value);
+    if (!file.value) return null;
+    const mimeType = file.value.contentType || file.value.mimetype;
+    return {
+      mimeType,
+      filename: file.value.name,
+      displayName: file.value.name || file.value.filename || "",
+    };
   });
 
   /**
-   * 文件类型判断计算属性
+   * 文件类型判断计算属性 - 直接使用后端type字段
    */
-  const isImage = computed(() => typeDetector.isImage(file.value));
-  const isVideo = computed(() => typeDetector.isVideo(file.value));
-  const isAudio = computed(() => typeDetector.isAudio(file.value));
-  const isPdf = computed(() => typeDetector.isPdf(file.value));
-  const isMarkdown = computed(() => typeDetector.isMarkdown(file.value));
-  const isHtml = computed(() => typeDetector.isHtml(file.value));
-  const isCode = computed(() => typeDetector.isCode(file.value));
-  const isText = computed(() => typeDetector.isText(file.value));
-  const isOffice = computed(() => typeDetector.isOffice(file.value));
-  // Office 子类型判断
-  const isWordDoc = computed(() => typeDetector.isWordDoc(file.value));
-  const isExcel = computed(() => typeDetector.isExcel(file.value));
-  const isPowerPoint = computed(() => typeDetector.isPowerPoint(file.value));
-  // 配置文件判断
-  const isConfig = computed(() => typeDetector.isConfig(file.value));
+  const isImageFile = computed(() => file.value?.type === FileType.IMAGE);
+  const isVideoFile = computed(() => file.value?.type === FileType.VIDEO);
+  const isAudioFile = computed(() => file.value?.type === FileType.AUDIO);
+  const isOfficeFile = computed(() => file.value?.type === FileType.OFFICE);
+  const isTextFile = computed(() => file.value?.type === FileType.TEXT);
+
+  // 基于文件类型的判断
+  const isPdfFile = computed(() => {
+    return file.value?.type === FileType.DOCUMENT;
+  });
+  // Office 子类型判断 - 基于MIME类型（保持原有逻辑）
+  const isWordDoc = computed(() => {
+    const mimeType = file.value?.contentType || file.value?.mimetype;
+    return mimeType?.includes("wordprocessingml") || mimeType === "application/msword";
+  });
+  const isExcel = computed(() => {
+    const mimeType = file.value?.contentType || file.value?.mimetype;
+    return mimeType?.includes("spreadsheetml") || mimeType === "application/vnd.ms-excel";
+  });
+  const isPowerPoint = computed(() => {
+    const mimeType = file.value?.contentType || file.value?.mimetype;
+    return mimeType?.includes("presentationml") || mimeType === "application/vnd.ms-powerpoint";
+  });
 
   /**
    * 预览URL - 直接使用文件信息中的preview_url字段
@@ -120,44 +103,10 @@ export function usePreviewRenderers(file, authInfo, emit, darkMode) {
     return useGoogleDocsPreview.value ? googleDocsPreviewUrl.value : microsoftOfficePreviewUrl.value;
   });
 
-  // ===== 文本内容加载 =====
+  // ===== 文本内容加载已移除 =====
 
   /**
-   * 加载文本内容
-   */
-  const loadTextContent = async () => {
-    // 文本文件、代码文件、Markdown文件、HTML文件都需要加载文本内容
-    if (!isText.value && !isCode.value && !isMarkdown.value && !isHtml.value) return;
-
-    try {
-      isTextLoading.value = true;
-      console.log("加载文本内容，URL:", previewUrl.value);
-
-      // S3预签名URL不需要额外的认证头和credentials
-      const response = await fetch(previewUrl.value, {
-        mode: "cors",
-      });
-
-      if (response.ok) {
-        const content = await response.text();
-        textContent.value = content;
-        await initializePreview();
-        handleContentLoaded();
-      } else {
-        textContent.value = t("fileView.preview.text.error");
-        handleContentError();
-      }
-    } catch (error) {
-      console.error("加载文本内容错误:", error);
-      textContent.value = t("fileView.preview.text.error");
-      handleContentError();
-    } finally {
-      isTextLoading.value = false;
-    }
-  };
-
-  /**
-   * 获取认证预览URL（暂时弃用）
+   * 获取认证预览URL
    */
   const fetchAuthenticatedUrl = async () => {
     try {
@@ -260,246 +209,6 @@ export function usePreviewRenderers(file, authInfo, emit, darkMode) {
     }
   };
 
-  // ===== Markdown渲染 =====
-
-  /**
-   * 懒加载 Vditor
-   */
-  const loadVditor = async () => {
-    if (!VditorClass) {
-      await loadVditorCSS();
-
-      // 从assets目录加载Vditor
-      const script = document.createElement("script");
-      script.src = "/assets/vditor/dist/index.min.js";
-
-      return new Promise((resolve, reject) => {
-        script.onload = () => {
-          VditorClass = window.Vditor;
-          resolve(VditorClass);
-        };
-        script.onerror = reject;
-        document.head.appendChild(script);
-      });
-    }
-    return VditorClass;
-  };
-
-  /**
-   * 加载 Vditor CSS
-   */
-  const loadVditorCSS = async () => {
-    if (!vditorCSSLoaded) {
-      const link = document.createElement("link");
-      link.rel = "stylesheet";
-      link.href = "/assets/vditor/dist/index.css";
-      document.head.appendChild(link);
-      vditorCSSLoaded = true;
-      console.log("Vditor CSS 加载成功");
-    }
-  };
-
-  /**
-   * 初始化Markdown预览
-   */
-  const initMarkdownPreview = async (container) => {
-    if (!textContent.value) return;
-
-    // 确保DOM更新后再初始化Vditor
-    await nextTick();
-
-    if (container) {
-      try {
-        // 清空之前的内容，避免重复渲染
-        container.innerHTML = "";
-        // 移除可能残留的主题相关类
-        container.classList.remove("vditor-reset--dark", "vditor-reset--light");
-
-        // 懒加载Vditor
-        const VditorConstructor = await loadVditor();
-
-        // 使用 Vditor 的预览 API 渲染内容
-        VditorConstructor.preview(container, textContent.value, {
-          mode: "dark-light", // 支持明暗主题
-          theme: {
-            current: darkMode?.value ? "dark" : "light", // 根据darkMode设置主题
-          },
-          cdn: "/assets/vditor",
-          hljs: {
-            lineNumber: true, // 代码块显示行号
-            style: darkMode?.value ? "vs2015" : "github", // 代码高亮样式
-          },
-          markdown: {
-            toc: true, // 启用目录
-            mark: true, // 启用标记
-            footnotes: true, // 启用脚注
-            autoSpace: true, // 自动空格
-            media: true, // 启用媒体链接解析
-            listStyle: true, // 启用列表样式支持
-          },
-          after: () => {
-            // 渲染完成后的回调
-            console.log("Markdown 内容渲染完成");
-
-            // 强制添加对应主题的类
-            if (darkMode?.value) {
-              container.classList.add("vditor-reset--dark");
-              container.classList.remove("vditor-reset--light");
-            } else {
-              container.classList.add("vditor-reset--light");
-              container.classList.remove("vditor-reset--dark");
-            }
-          },
-        });
-
-        // 标记为已渲染
-        isMarkdownRendered.value = true;
-        console.log("Markdown 预览初始化成功");
-      } catch (error) {
-        console.error("Markdown 预览初始化失败:", error);
-        // 降级处理：显示原始文本
-        if (container) {
-          container.innerHTML = `<pre style="white-space: pre-wrap; word-wrap: break-word;">${textContent.value}</pre>`;
-        }
-      }
-    }
-  };
-
-  /**
-   * 渲染Markdown
-   */
-  const renderMarkdown = async () => {
-    if (!textContent.value) {
-      await loadTextContent();
-    }
-
-    if (textContent.value && previewContainer.value) {
-      await initMarkdownPreview(previewContainer.value);
-    }
-  };
-
-  // ===== 代码高亮 =====
-
-  /**
-   * 高亮并格式化代码
-   */
-  const highlightAndFormatCode = () => {
-    if (!textContent.value) return;
-
-    try {
-      // 获取文件类型信息
-      const typeInfo = fileTypeInfo.value;
-      let language = "";
-
-      if (typeInfo && typeInfo.type === "code") {
-        language = typeInfo.language || "";
-      }
-
-      // 如果没有指定语言，尝试自动检测
-      if (!language) {
-        const detected = hljs.highlightAuto(textContent.value);
-        language = detected.language || "plaintext";
-      }
-
-      // 进行语法高亮
-      let highlighted;
-      if (language && language !== "plaintext") {
-        try {
-          highlighted = hljs.highlight(textContent.value, { language });
-        } catch (langError) {
-          console.warn(`语言 ${language} 高亮失败，使用自动检测:`, langError);
-          highlighted = hljs.highlightAuto(textContent.value);
-        }
-      } else {
-        highlighted = hljs.highlightAuto(textContent.value);
-      }
-
-      highlightedContent.value = highlighted.value;
-      codeLanguage.value = highlighted.language || language || "plaintext";
-
-      console.log(`代码高亮完成，语言: ${codeLanguage.value}`);
-    } catch (error) {
-      console.error("代码高亮失败:", error);
-      // 降级处理：显示原始文本
-      highlightedContent.value = textContent.value;
-      codeLanguage.value = "plaintext";
-    }
-  };
-
-  /**
-   * 高亮代码
-   */
-  const highlightCode = async () => {
-    if (!textContent.value) {
-      await loadTextContent();
-    }
-
-    if (textContent.value) {
-      highlightAndFormatCode();
-    }
-  };
-
-  // ===== HTML预览 =====
-
-  /**
-   * 初始化 HTML 预览
-   */
-  const initHtmlPreview = async () => {
-    await nextTick();
-
-    if (htmlIframe.value && textContent.value) {
-      try {
-        // 创建安全的HTML文档
-        const htmlDoc = `
-<!DOCTYPE html>
-<html lang="zh-CN">
-<head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>HTML Preview</title>
-    <style>
-        body {
-            margin: 0;
-            padding: 16px;
-            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
-            line-height: 1.6;
-            color: #333;
-            background: #fff;
-        }
-
-        /* 响应式设计 */
-        @media (max-width: 768px) {
-            body {
-                padding: 8px;
-                font-size: 14px;
-            }
-        }
-
-        /* 基础样式重置 */
-        * {
-            box-sizing: border-box;
-        }
-    </style>
-</head>
-<body>
-${textContent.value}
-</body>
-</html>`;
-
-        const iframeDoc = htmlIframe.value.contentDocument || htmlIframe.value.contentWindow.document;
-
-        // 写入HTML内容
-        iframeDoc.open();
-        iframeDoc.write(htmlDoc);
-        iframeDoc.close();
-
-        console.log("HTML 预览初始化成功");
-      } catch (error) {
-        console.error("HTML 预览初始化失败:", error);
-      }
-    }
-  };
-
   // ===== 全屏功能 =====
 
   /**
@@ -567,23 +276,7 @@ ${textContent.value}
     );
   };
 
-  /**
-   * 切换HTML全屏
-   */
-  const toggleHtmlFullscreen = () => {
-    toggleFullscreen(
-      htmlPreviewRef,
-      isHtmlFullscreen,
-      () => {
-        // 进入全屏时的回调
-        console.log("HTML预览进入全屏");
-      },
-      () => {
-        // 退出全屏时的回调
-        console.log("HTML预览退出全屏");
-      }
-    );
-  };
+  // ===== HTML全屏功能已移除 =====
 
   /**
    * 监听全屏变化事件
@@ -592,7 +285,6 @@ ${textContent.value}
     // 如果不在全屏状态，重置全屏标志
     if (!document.fullscreenElement) {
       isOfficeFullscreen.value = false;
-      isHtmlFullscreen.value = false;
       console.log("全屏状态已重置");
     }
   };
@@ -610,26 +302,7 @@ ${textContent.value}
 
   // ===== 编辑功能 =====
 
-  /**
-   * 进入编辑模式
-   */
-  const enterEditMode = () => {
-    editContent.value = textContent.value;
-    isEditMode.value = true;
-  };
-
-  /**
-   * 退出编辑模式
-   */
-  const exitEditMode = async () => {
-    isEditMode.value = false;
-    editContent.value = "";
-    showModeDropdown.value = false;
-
-    // 重新初始化预览
-    await nextTick();
-    await initializePreview();
-  };
+  // ===== 编辑模式已移除 =====
 
   // ===== Office预览服务切换 =====
 
@@ -686,47 +359,30 @@ ${textContent.value}
   // ===== 初始化和清理 =====
 
   /**
-   * 初始化预览
+   * 初始化预览（仅保留基本功能）
    */
   const initializePreview = async () => {
-    if (isMarkdown.value) {
-      await renderMarkdown();
-    } else if (isCode.value) {
-      await highlightCode();
-    } else if (isHtml.value) {
-      await initHtmlPreview();
-    }
-    // 其他文件类型的预览由模板中的条件渲染处理
+    // 文本/代码/Markdown/HTML预览已移除
+    // 图片、视频、音频、PDF、Office预览由模板中的条件渲染处理
+    console.log("预览初始化完成");
   };
 
   /**
    * 为文件初始化
    */
   const initializeForFile = async (newFile) => {
-    // 重置所有状态
-    textContent.value = "";
+    // 重置基本状态
     loadError.value = false;
     authenticatedPreviewUrl.value = null;
-    isMarkdownRendered.value = false;
-    highlightedContent.value = "";
-    codeLanguage.value = "";
+
+    // 重置Office预览状态
     officePreviewLoading.value = false;
     officePreviewError.value = "";
     officePreviewTimedOut.value = false;
     microsoftOfficePreviewUrl.value = "";
     googleDocsPreviewUrl.value = "";
     isOfficeFullscreen.value = false;
-    isHtmlFullscreen.value = false;
     clearPreviewLoadTimeout();
-
-    // 重置编辑模式状态
-    isEditMode.value = false;
-    editContent.value = "";
-    isSaving.value = false;
-    showModeDropdown.value = false;
-
-    // 重置扩展功能状态
-    isGeneratingPreview.value = false;
 
     console.log("文件预览渲染器已重置，准备预览新文件:", newFile?.name || "无文件");
   };
@@ -735,36 +391,9 @@ ${textContent.value}
    * 重新初始化预览（主题变化时）
    */
   const reinitializePreviewOnThemeChange = async () => {
-    if (isEditMode.value) return; // 编辑模式下不需要重新初始化预览
-
-    let scrollPosition = 0;
-
-    // 保存当前滚动位置（如果有滚动容器）
-    if (isMarkdown.value && previewContainer.value) {
-      scrollPosition = previewContainer.value.scrollTop || 0;
-    }
-
-    // 如果是Markdown，重置渲染状态并重新渲染
-    if (isMarkdown.value) {
-      isMarkdownRendered.value = false;
-      await renderMarkdown();
-
-      // 恢复滚动位置（如果之前有记录）
-      if (previewContainer.value && scrollPosition > 0) {
-        await nextTick();
-        previewContainer.value.scrollTop = scrollPosition;
-      }
-    }
-
-    // 如果是HTML，重新初始化HTML预览
-    if (isHtml.value) {
-      await initHtmlPreview();
-    }
-
-    // 如果是代码，重新应用代码高亮
-    if (isCode.value && highlightedContent.value) {
-      await highlightCode();
-    }
+    // 文本/代码/Markdown/HTML预览已移除
+    // 图片、视频、音频、PDF、Office预览不需要主题重新初始化
+    console.log("主题变化预览重新初始化完成");
   };
 
   // ===== 监听器 =====
@@ -785,13 +414,9 @@ ${textContent.value}
   watch(
     () => file.value,
     (newFile) => {
-      // 重置所有状态（与 initializeForFile 相同）
-      textContent.value = "";
+      // 重置基本状态
       loadError.value = false;
       authenticatedPreviewUrl.value = null;
-      highlightedContent.value = "";
-      codeLanguage.value = "";
-      isMarkdownRendered.value = false;
 
       // 重置Office预览状态
       microsoftOfficePreviewUrl.value = "";
@@ -801,16 +426,8 @@ ${textContent.value}
       officePreviewTimedOut.value = false;
       clearPreviewLoadTimeout();
 
-      // 重置编辑模式状态
-      isEditMode.value = false;
-      editContent.value = "";
-      isSaving.value = false;
-      showModeDropdown.value = false;
-
-      // 重置扩展功能状态
-      isGeneratingPreview.value = false;
+      // 重置全屏状态
       isOfficeFullscreen.value = false;
-      isHtmlFullscreen.value = false;
 
       // 只有当文件存在时才初始化预览
       if (newFile) {
@@ -827,17 +444,13 @@ ${textContent.value}
         const typeInfo = fileTypeInfo.value;
         console.log("🎯 文件类型检测结果:", typeInfo);
 
-        // 显示各种类型判断结果
+        // 显示保留的类型判断结果
         const typeChecks = {
-          isImage: isImage.value,
-          isVideo: isVideo.value,
-          isAudio: isAudio.value,
-          isPdf: isPdf.value,
-          isOffice: isOffice.value,
-          isMarkdown: isMarkdown.value,
-          isHtml: isHtml.value,
-          isCode: isCode.value,
-          isText: isText.value,
+          isImage: isImageFile.value,
+          isVideo: isVideoFile.value,
+          isAudio: isAudioFile.value,
+          isPdf: isPdfFile.value,
+          isOffice: isOfficeFile.value,
         };
         console.log("📋 类型判断结果:", typeChecks);
 
@@ -846,25 +459,21 @@ ${textContent.value}
         console.log(`✅ 最终预览类型: ${selectedType}`);
         console.groupEnd();
 
-        // 对于需要加载文本内容的文件类型（文本、代码、Markdown、HTML），先设置加载状态，然后加载内容
-        if (typeChecks.isText || typeChecks.isCode || typeChecks.isMarkdown || typeChecks.isHtml) {
-          isTextLoading.value = true;
-          loadTextContent();
-        } else {
-          isTextLoading.value = false;
-        }
-
-        //使用S3预签名URL
+        // 使用S3预签名URL（图片、视频、音频、PDF、压缩文件）
         if (typeChecks.isImage || typeChecks.isVideo || typeChecks.isAudio || typeChecks.isPdf) {
           authenticatedPreviewUrl.value = previewUrl.value;
+        }
+
+        // 为压缩文件也生成预览URL（用于在线解压）
+        if (file.value?.name && isArchiveFile(file.value.name)) {
+          authenticatedPreviewUrl.value = previewUrl.value;
+          console.log("为压缩文件生成预览URL:", previewUrl.value);
         }
 
         // 如果是Office文件，更新Office预览URL
         if (typeChecks.isOffice) {
           updateOfficePreviewUrls();
         }
-      } else {
-        isTextLoading.value = false;
       }
     },
     { immediate: true }
@@ -893,14 +502,6 @@ ${textContent.value}
       authenticatedPreviewUrl.value = null;
     }
 
-    // 清理编辑模式状态
-    if (isEditMode.value) {
-      isEditMode.value = false;
-    }
-    if (editContent.value) {
-      editContent.value = "";
-    }
-
     // 移除事件监听器
     document.removeEventListener("fullscreenchange", handleFullscreenChange);
     document.removeEventListener("keydown", handleKeyDown);
@@ -912,7 +513,6 @@ ${textContent.value}
     }
 
     // 清理其他资源
-    textContent.value = "";
     microsoftOfficePreviewUrl.value = "";
     googleDocsPreviewUrl.value = "";
 
@@ -923,19 +523,9 @@ ${textContent.value}
   // 移除了对 useFilePreviewExtensions 的直接调用以避免循环依赖
 
   return {
-    // 状态
-    textContent,
-    isTextLoading,
+    // 保留的状态
     loadError,
     authenticatedPreviewUrl,
-    isGeneratingPreview,
-    isEditMode,
-    editContent,
-    isSaving,
-    showModeDropdown,
-    isMarkdownRendered,
-    highlightedContent,
-    codeLanguage,
     officePreviewLoading,
     officePreviewError,
     officePreviewTimedOut,
@@ -944,48 +534,32 @@ ${textContent.value}
     googleDocsPreviewUrl,
     useGoogleDocsPreview,
     isOfficeFullscreen,
-    isHtmlFullscreen,
     officePreviewConfig,
 
-    // 计算属性
+    // 保留的计算属性
     fileTypeInfo,
-    isImage,
-    isVideo,
-    isAudio,
-    isPdf,
-    isMarkdown,
-    isHtml,
-    isCode,
-    isConfig,
-    isOffice,
+    isImage: isImageFile,
+    isVideo: isVideoFile,
+    isAudio: isAudioFile,
+    isPdf: isPdfFile,
+    isOffice: isOfficeFile,
+    isText: isTextFile,
     isWordDoc,
     isExcel,
     isPowerPoint,
-    isText,
     previewUrl,
     currentOfficePreviewUrl,
 
-    // DOM 引用
-    previewContainer,
-    htmlIframe,
+    // 保留的DOM引用
     officePreviewRef,
-    htmlPreviewRef,
 
-    // 方法
-    loadTextContent,
+    // 保留的方法
     fetchAuthenticatedUrl,
     getOfficeDirectUrlForPreview,
     updateOfficePreviewUrls,
     startPreviewLoadTimeout,
     clearPreviewLoadTimeout,
     initializePreview,
-    loadVditor,
-    loadVditorCSS,
-    initMarkdownPreview,
-    renderMarkdown,
-    initHtmlPreview,
-    highlightAndFormatCode,
-    highlightCode,
     toggleFullscreen,
     handleFullscreenChange,
     handleKeyDown,
@@ -993,11 +567,8 @@ ${textContent.value}
     handleContentError,
     formatFileSize,
     formatDate,
-    enterEditMode,
-    exitEditMode,
     toggleOfficePreviewService,
     toggleOfficeFullscreen,
-    toggleHtmlFullscreen,
     reinitializePreviewOnThemeChange,
     initializeForFile,
 
