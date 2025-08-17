@@ -69,6 +69,25 @@ export async function handlePut(c, path, userId, userType, db) {
     const mountManager = new MountManager(db, encryptionSecret);
     const fileSystem = new FileSystem(mountManager);
 
+    // 在PUT时自动创建父目录
+    const parentPath = path.substring(0, path.lastIndexOf("/"));
+    if (parentPath && parentPath !== "/" && parentPath !== "") {
+      try {
+        console.log(`WebDAV PUT - 确保父目录存在: ${parentPath}`);
+        await fileSystem.createDirectory(parentPath, userId, userType);
+        console.log(`WebDAV PUT - 父目录已确保存在: ${parentPath}`);
+      } catch (error) {
+        // 如果目录已存在（409 Conflict），这是正常情况，继续上传
+        if (error.status === 409 || error.message?.includes("已存在") || error.message?.includes("exists")) {
+          console.log(`WebDAV PUT - 父目录已存在，继续上传: ${parentPath}`);
+        } else {
+          // 其他错误（如权限不足、存储空间不足等）应该阻止上传
+          console.error(`WebDAV PUT - 创建父目录失败: ${error.message}`);
+          throw error;
+        }
+      }
+    }
+
     // 获取WebDAV上传模式设置
     const uploadMode = await getWebDAVUploadMode(db);
     console.log(`WebDAV PUT - 使用配置的上传模式: ${uploadMode}`);
@@ -145,7 +164,7 @@ export async function handlePut(c, path, userId, userType, db) {
 
     // 根据最终决定的上传模式处理
     if (finalUploadMode === "direct") {
-      console.log(`WebDAV PUT - 使用直接流式上传模式`);
+      console.log(`WebDAV PUT - 使用直接上传模式`);
 
       try {
         // 使用FileSystem抽象层的uploadStream方法
@@ -159,7 +178,7 @@ export async function handlePut(c, path, userId, userType, db) {
         const duration = Date.now() - startTime;
 
         const speedMBps = declaredContentLength > 0 ? (declaredContentLength / 1024 / 1024 / (duration / 1000)).toFixed(2) : "未知";
-        console.log(`WebDAV PUT - 直接流式上传成功，用时: ${duration}ms，速度: ${speedMBps}MB/s，ETag: ${result.etag}`);
+        console.log(`WebDAV PUT - 直接上传成功，用时: ${duration}ms，速度: ${speedMBps}MB/s，ETag: ${result.etag}`);
 
         return new Response(null, {
           status: 201, // Created
@@ -170,7 +189,7 @@ export async function handlePut(c, path, userId, userType, db) {
           },
         });
       } catch (error) {
-        console.error(`WebDAV PUT - 直接流式上传失败: ${error.message}`);
+        console.error(`WebDAV PUT - 直接上传失败: ${error.message}`);
         throw error;
       }
     } else {
