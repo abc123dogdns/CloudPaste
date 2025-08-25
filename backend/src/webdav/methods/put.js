@@ -6,9 +6,10 @@ import { MountManager } from "../../storage/managers/MountManager.js";
 import { FileSystem } from "../../storage/fs/FileSystem.js";
 import { getEffectiveMimeType } from "../../utils/fileUtils.js";
 import { handleWebDAVError } from "../utils/errorUtils.js";
+import { getStandardWebDAVHeaders } from "../utils/headerUtils.js";
 import { clearDirectoryCache } from "../../cache/index.js";
 import { getSettingsByGroup } from "../../services/systemService.js";
-import { getLockManager } from "../utils/LockManager.js";
+import { lockManager } from "../utils/LockManager.js";
 import { checkLockPermission } from "../utils/lockUtils.js";
 
 /**
@@ -93,11 +94,11 @@ export async function handlePut(c, path, userId, userType, db) {
     console.log(`WebDAV PUT - 使用配置的上传模式: ${uploadMode}`);
 
     // 检查锁定状态
-    const lockManager = getLockManager();
-    const lockInfo = await lockManager.getLock(path);
-    if (lockInfo && !checkLockPermission(lockInfo, userId, userType)) {
-      return new Response(null, {
-        status: 423, // Locked
+    const ifHeader = c.req.header("If");
+    const lockConflict = checkLockPermission(lockManager, path, ifHeader, "PUT");
+    if (lockConflict) {
+      return new Response(lockConflict.message, {
+        status: lockConflict.status,
         headers: { "Content-Type": "text/plain" },
       });
     }
@@ -145,10 +146,12 @@ export async function handlePut(c, path, userId, userType, db) {
 
       return new Response(null, {
         status: 201, // Created
-        headers: {
-          "Content-Type": "text/plain",
-          "Content-Length": "0",
-        },
+        headers: getStandardWebDAVHeaders({
+          customHeaders: {
+            "Content-Type": "text/plain",
+            "Content-Length": "0",
+          },
+        }),
       });
     }
 
@@ -182,11 +185,13 @@ export async function handlePut(c, path, userId, userType, db) {
 
         return new Response(null, {
           status: 201, // Created
-          headers: {
-            "Content-Type": "text/plain",
-            "Content-Length": "0",
-            ETag: result.etag || "",
-          },
+          headers: getStandardWebDAVHeaders({
+            customHeaders: {
+              "Content-Type": "text/plain",
+              "Content-Length": "0",
+              ETag: result.etag || "",
+            },
+          }),
         });
       } catch (error) {
         console.error(`WebDAV PUT - 直接上传失败: ${error.message}`);
@@ -212,11 +217,13 @@ export async function handlePut(c, path, userId, userType, db) {
 
         return new Response(null, {
           status: 201, // Created
-          headers: {
-            "Content-Type": "text/plain",
-            "Content-Length": "0",
-            ETag: result.etag || "",
-          },
+          headers: getStandardWebDAVHeaders({
+            customHeaders: {
+              "Content-Type": "text/plain",
+              "Content-Length": "0",
+              ETag: result.etag || "",
+            },
+          }),
         });
       } catch (error) {
         console.error(`WebDAV PUT - 流式分片上传失败: ${error.message}`);

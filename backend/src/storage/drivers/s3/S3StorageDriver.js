@@ -90,19 +90,20 @@ export class S3StorageDriver extends BaseDriver {
     const { mount, subPath, db } = options;
 
     // 规范化S3子路径
-    const s3SubPath = normalizeS3SubPath(subPath, this.config, true);
+    const s3SubPath = normalizeS3SubPath(subPath, true);
 
     // 更新挂载点的最后使用时间
     if (db && mount.id) {
       await updateMountLastUsed(db, mount.id);
     }
 
-    // 委托给目录操作模块
+    // 委托给目录操作模块，传递所有选项参数
     return await this.directoryOps.listDirectory(s3SubPath, {
       mount,
       subPath, // 使用正确的子路径用于缓存键生成
       path,
       db,
+      ...options,
     });
   }
 
@@ -118,7 +119,7 @@ export class S3StorageDriver extends BaseDriver {
     const { mount, subPath, db, userType, userId, request } = options;
 
     // 规范化S3子路径
-    const s3SubPath = normalizeS3SubPath(subPath, this.config, false);
+    const s3SubPath = normalizeS3SubPath(subPath, false);
 
     // 更新挂载点的最后使用时间
     if (db && mount.id) {
@@ -174,7 +175,7 @@ export class S3StorageDriver extends BaseDriver {
     const { mount, subPath, db, request } = options;
 
     // 规范化S3子路径
-    const s3SubPath = normalizeS3SubPath(subPath, this.config, false);
+    const s3SubPath = normalizeS3SubPath(subPath, false);
 
     // 更新挂载点的最后使用时间
     if (db && mount.id) {
@@ -201,7 +202,7 @@ export class S3StorageDriver extends BaseDriver {
     const { mount, subPath, db, userIdOrInfo, userType, useMultipart = true } = options;
 
     // 规范化S3子路径
-    const s3SubPath = normalizeS3SubPath(subPath, this.config, false);
+    const s3SubPath = normalizeS3SubPath(subPath, false);
 
     if (useMultipart) {
       // 使用分片上传
@@ -237,7 +238,7 @@ export class S3StorageDriver extends BaseDriver {
     const { mount, subPath, db, userIdOrInfo, userType, filename, contentType, contentLength, useMultipart = false } = options;
 
     // 规范化S3子路径
-    const s3SubPath = normalizeS3SubPath(subPath, this.config, false);
+    const s3SubPath = normalizeS3SubPath(subPath, false);
 
     // 构建完整的S3 key
     const s3Key = this._normalizeFilePath(s3SubPath, path, filename);
@@ -267,7 +268,7 @@ export class S3StorageDriver extends BaseDriver {
     const { mount, subPath, db } = options;
 
     // 规范化S3子路径
-    const s3SubPath = normalizeS3SubPath(subPath, this.config, true);
+    const s3SubPath = normalizeS3SubPath(subPath, true);
 
     // 更新挂载点的最后使用时间
     if (db && mount.id) {
@@ -361,7 +362,7 @@ export class S3StorageDriver extends BaseDriver {
     const { mount, subPath, db, operation = "download" } = options;
 
     // 规范化S3子路径
-    const s3SubPath = normalizeS3SubPath(subPath, this.config, false);
+    const s3SubPath = normalizeS3SubPath(subPath, false);
 
     // 更新挂载点的最后使用时间
     if (db && mount.id) {
@@ -401,7 +402,7 @@ export class S3StorageDriver extends BaseDriver {
     const { mount, subPath, db } = options;
 
     // 规范化S3子路径
-    const s3SubPath = normalizeS3SubPath(subPath, this.config, false);
+    const s3SubPath = normalizeS3SubPath(subPath, false);
 
     // 提取文件名
     const fileName = path.split("/").filter(Boolean).pop() || "file";
@@ -451,7 +452,7 @@ export class S3StorageDriver extends BaseDriver {
     const { subPath } = options;
 
     // 规范化S3子路径
-    const s3SubPath = normalizeS3SubPath(subPath, this.config, false);
+    const s3SubPath = normalizeS3SubPath(subPath, false);
 
     // 委托给文件操作模块检查存在性
     return await this.fileOps.exists(s3SubPath);
@@ -666,7 +667,7 @@ export class S3StorageDriver extends BaseDriver {
    */
   _normalizeFilePath(subPath, path, customFilename) {
     // 规范化S3子路径 (不添加斜杠，因为是文件)
-    let s3SubPath = normalizeS3SubPath(subPath, this.config, false);
+    let s3SubPath = normalizeS3SubPath(subPath, false);
 
     // 获取文件名，优先使用自定义文件名，其次从路径中提取
     const fileName = customFilename || path.split("/").filter(Boolean).pop() || "unnamed_file";
