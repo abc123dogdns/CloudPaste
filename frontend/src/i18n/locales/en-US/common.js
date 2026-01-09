@@ -80,6 +80,7 @@ export default {
         recommended: "Recommended",
         matchScore: "Match {score}%",
         partsInfo: "{count}/{total} parts",
+        partErrors: "{count} failed",
         partialComplete: "Partially complete",
         atLeastParts: "At least {count} parts",
         progressInfo: "{percentage}% ({uploaded}/{total}MB)",
@@ -122,7 +123,7 @@ export default {
     },
   },
   nav: {
-    home: "Home",
+    home: "Text Editor",
     upload: "File Upload",
     mountExplorer: "Mount Explorer",
     admin: "Admin Panel",

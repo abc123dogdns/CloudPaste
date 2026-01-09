@@ -81,6 +81,7 @@ export default {
         recommended: "推荐",
         matchScore: "匹配度 {score}%",
         partsInfo: "{count}/{total} 分片",
+        partErrors: "失败 {count} 片",
         partialComplete: "部分完成",
         atLeastParts: "至少 {count} 分片",
         progressInfo: "{percentage}% ({uploaded}/{total}MB)",
@@ -123,7 +124,7 @@ export default {
     },
   },
   nav: {
-    home: "首页",
+    home: "文本编辑",
     upload: "文件上传",
     mountExplorer: "挂载浏览",
     admin: "管理面板",

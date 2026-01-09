@@ -1,4 +1,6 @@
-import { ref, onMounted, onBeforeUnmount, unref } from "vue";
+import { ref, onMounted, unref } from "vue";
+import { useEventListener } from "@vueuse/core";
+import { createLogger } from "@/utils/logger.js";
 
 /**
  * 通用"元素全屏"工具（Fullscreen API）
@@ -7,8 +9,12 @@ import { ref, onMounted, onBeforeUnmount, unref } from "vue";
  *   - Vue ref（如 ref(null)）
  *   - 返回元素的函数（如 () => props.fullscreenTarget）
  *   - 直接的 HTMLElement
+ * @param {{ includeChildren?: boolean }} [options] - 额外选项：
+ *   - includeChildren：是否把“子元素进入全屏”也视为目标元素全屏（默认 true）
  */
-export function useElementFullscreen(targetRef) {
+export function useElementFullscreen(targetRef, options = {}) {
+  const log = createLogger("ElementFullscreen");
+  const includeChildren = options?.includeChildren !== false;
   const isFullscreen = ref(false);
 
   const getTargetEl = () => {
@@ -21,21 +27,24 @@ export function useElementFullscreen(targetRef) {
   const syncState = () => {
     const el = getTargetEl();
     const fullscreenEl = document.fullscreenElement;
+    if (!el || !fullscreenEl) {
+      isFullscreen.value = false;
+      return;
+    }
     // 兼容：有些组件会对“目标元素内部的子元素”触发全屏（例如视频播放器）
-    // 这种情况下，也应该认为“目标元素处于全屏状态”，否则顶部按钮状态会不同步。
-    isFullscreen.value = Boolean(el && fullscreenEl && (fullscreenEl === el || el.contains(fullscreenEl)));
+    isFullscreen.value = includeChildren ? fullscreenEl === el || el.contains(fullscreenEl) : fullscreenEl === el;
   };
 
   const requestFullscreen = async () => {
     const el = getTargetEl();
     if (!el) {
-      console.warn("[useElementFullscreen] No target element found for fullscreen");
+      log.warn("[useElementFullscreen] No target element found for fullscreen");
       return;
     }
     try {
       await el.requestFullscreen();
     } catch (err) {
-      console.warn("[useElementFullscreen] Fullscreen request failed:", err);
+      log.warn("[useElementFullscreen] Fullscreen request failed:", err);
     } finally {
       syncState();
     }
@@ -45,7 +54,11 @@ export function useElementFullscreen(targetRef) {
     const el = getTargetEl();
     const fullscreenEl = document.fullscreenElement;
     if (!el || !fullscreenEl) return;
-    if (fullscreenEl !== el && !el.contains(fullscreenEl)) return;
+    if (includeChildren) {
+      if (fullscreenEl !== el && !el.contains(fullscreenEl)) return;
+    } else {
+      if (fullscreenEl !== el) return;
+    }
     try {
       await document.exitFullscreen();
     } catch {
@@ -67,13 +80,10 @@ export function useElementFullscreen(targetRef) {
     syncState();
   };
 
-  onMounted(() => {
-    document.addEventListener("fullscreenchange", handleFullscreenChange);
-    syncState();
-  });
+  useEventListener(document, "fullscreenchange", handleFullscreenChange);
 
-  onBeforeUnmount(() => {
-    document.removeEventListener("fullscreenchange", handleFullscreenChange);
+  onMounted(() => {
+    syncState();
   });
 
   return {
